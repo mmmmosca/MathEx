@@ -53,5 +53,5 @@ Using the previous example:
 f(x) --eq
 
 Output:
-(x+2)
+x+2
 ```
