@@ -48,88 +48,112 @@ def format_poly(p):
     return expr
 
 def split_top_level(expr, sep):
-    parts=[]
-    buf=""
-    depth=0
+    parts = []
+    buf = ""
+    depth = 0
     for c in expr:
-        if c=="(": depth+=1
-        elif c==")": depth-=1
-        if c==sep and depth==0:
+        if c == "(": depth += 1
+        elif c == ")": depth -= 1
+        if c == sep and depth == 0:
             parts.append(buf)
-            buf=""
+            buf = ""
         else:
-            buf+=c
+            buf += c
     if buf: parts.append(buf)
     return parts
 
 def parse_expr(expr):
     expr = expr.strip()
+    if expr.startswith("\\(") and expr.endswith(")"):
+        return {0: 0}
+    # Strip redundant outer parentheses
     while expr.startswith("(") and expr.endswith(")"):
-        depth=0
-        for i,c in enumerate(expr):
-            if c=="(": depth+=1
-            elif c==")": depth-=1
-            if depth==0 and i<len(expr)-1: break
+        if expr.startswith("\\("): break
+        depth = 0
+        for i, c in enumerate(expr):
+            if c == "(": depth += 1
+            elif c == ")": depth -= 1
+            if depth == 0 and i < len(expr) - 1: break
         else:
             expr = expr[1:-1].strip()
             continue
         break
     parts = split_top_level(expr, "+")
-    if len(parts)>1:
+    if len(parts) > 1:
         p = parse_expr(parts[0])
         for t in parts[1:]:
             p = add_poly(p, parse_expr(t))
         return p
     parts = split_top_level(expr, "-")
-    if len(parts)>1:
+    if len(parts) > 1:
         p = parse_expr(parts[0])
         for t in parts[1:]:
-            p = add_poly(p, {k:-v for k,v in parse_expr(t).items()})
+            p = add_poly(p, {k: -v for k, v in parse_expr(t).items()})
         return p
     parts = split_top_level(expr, "*")
-    if len(parts)>1:
+    if len(parts) > 1:
         p = parse_expr(parts[0])
         for f in parts[1:]:
             p = mul_poly(p, parse_expr(f))
         return p
     parts = split_top_level(expr, "^")
-    if len(parts)==2:
+    if len(parts) == 2:
         base, power = parts
-        power_val = int(eval_ast(parser.Parser(lexer.Lexer(power).tokenize()).parseAssignment()))
+        try: power_val = int(power)
+        except: power_val = 1
         return pow_poly(parse_expr(base), power_val)
     return parse_term(expr)
 
 def parse_term(term):
     term = term.strip()
+    if term.startswith("\\(") and term.endswith(")"):
+        return {0: 0}
     if term.startswith("(") and term.endswith(")"):
         return parse_expr(term)
     try:
-        return {0:int(term)}
+        return {0: int(term)}
     except:
-        if term=="x": return {1:1}
-        elif term=="-x": return {1:-1}
+        if term == "x": return {1: 1}
+        elif term == "-x": return {1: -1}
         return parse_expr(term)
 
 def substitute(node, param, value):
-    if node.type == parser.NodeType.Number: return node.token.s
+    """Reconstruct a clean expression string with substitution applied."""
+    if node.type == parser.NodeType.Number:
+        return node.token.s
     elif node.type == parser.NodeType.Variable:
-        if node.token.s == param: return f"({value})"
+        if node.token.s == param:
+            return value
         return node.token.s
     elif node.type == parser.NodeType.BinOp:
         left = substitute(node.lhs, param, value)
         right = substitute(node.rhs, param, value)
         op = node.token.type
-        if op == lexer.TokenType.PLUS: return f"({left}+{right})"
-        elif op == lexer.TokenType.MINUS: return f"({left}-{right})"
-        elif op == lexer.TokenType.STAR: return f"({left}*{right})"
-        elif op == lexer.TokenType.FSLASH: return f"({left}/{right})"
-        elif op == lexer.TokenType.POWER: return f"({left}^{right})"
+        if op == lexer.TokenType.PLUS:   return f"{left}+{right}"
+        elif op == lexer.TokenType.MINUS:  return f"{left}-{right}"
+        elif op == lexer.TokenType.STAR:
+            # Wrap operands in parens only if they contain + or - (lower precedence)
+            l = f"({left})" if any(c in left for c in "+-") else left
+            r = f"({right})" if any(c in right for c in "+-") else right
+            return f"{l}*{r}"
+        elif op == lexer.TokenType.FSLASH:
+            l = f"({left})" if any(c in left for c in "+-") else left
+            r = f"({right})" if any(c in right for c in "+-") else right
+            return f"{l}/{r}"
+        elif op == lexer.TokenType.POWER:
+            # Base needs parens if it's a compound expression
+            l = f"({left})" if any(c in left for c in "+-*/") else left
+            return f"{l}^{right}"
     elif node.type == parser.NodeType.UnOp:
         val = substitute(node.rhs, param, value)
-        if node.token.type == lexer.TokenType.MINUS: return f"(-{val})"
-        elif node.token.type == lexer.TokenType.SQRT: return f"sqrt({val})"
+        if node.token.type == lexer.TokenType.MINUS:
+            return f"-({val})" if any(c in val for c in "+-") else f"-{val}"
+        elif node.token.type == lexer.TokenType.SQRT:
+            if val.startswith("\\(") and val.endswith(")"): return f"\\{val[1:]}"
+            return f"\\({val})"
     elif node.type == parser.NodeType.Parenthesis:
-        return f"({substitute(node.expr,param,value)})"
+        # Just pass through — outer context will add parens if needed
+        return substitute(node.expr, param, value)
     elif node.type == parser.NodeType.Call:
         func = functions.get(node.id)
         if func is None: raise ValueError(f"Undefined function: {node.id}")
@@ -144,17 +168,28 @@ def eval_eq(node: parser.Node):
         left = eval_eq(node.lhs)
         right = eval_eq(node.rhs)
         op = node.token.type
-        if op == lexer.TokenType.PLUS: return f"({left}+{right})"
-        elif op == lexer.TokenType.MINUS: return f"({left}-{right})"
-        elif op == lexer.TokenType.STAR: return f"({left}*{right})"
-        elif op == lexer.TokenType.FSLASH: return f"({left}/{right})"
-        elif op == lexer.TokenType.POWER: return f"({left}^{right})"
+        if op == lexer.TokenType.PLUS:   return f"{left}+{right}"
+        elif op == lexer.TokenType.MINUS:  return f"{left}-{right}"
+        elif op == lexer.TokenType.STAR:
+            l = f"({left})" if any(c in left for c in "+-") else left
+            r = f"({right})" if any(c in right for c in "+-") else right
+            return f"{l}*{r}"
+        elif op == lexer.TokenType.FSLASH:
+            l = f"({left})" if any(c in left for c in "+-") else left
+            r = f"({right})" if any(c in right for c in "+-") else right
+            return f"{l}/{r}"
+        elif op == lexer.TokenType.POWER:
+            l = f"({left})" if any(c in left for c in "+-*/") else left
+            return f"{l}^{right}"
     elif node.type == parser.NodeType.UnOp:
         val = eval_eq(node.rhs)
-        if node.token.type == lexer.TokenType.MINUS: return f"(-{val})"
-        elif node.token.type == lexer.TokenType.SQRT: return f"sqrt({val})"
+        if node.token.type == lexer.TokenType.MINUS:
+            return f"-({val})" if any(c in val for c in "+-") else f"-{val}"
+        elif node.token.type == lexer.TokenType.SQRT:
+            if val.startswith("\\(") and val.endswith(")"): return f"\\{val[1:]}"
+            return f"\\({val})"
     elif node.type == parser.NodeType.Parenthesis:
-        return f"({eval_eq(node.expr)})"
+        return eval_eq(node.expr)
     elif node.type == parser.NodeType.Function:
         functions[node.id] = node
         return None
@@ -163,6 +198,7 @@ def eval_eq(node: parser.Node):
         if func is None: raise ValueError(f"Undefined function: {node.id}")
         arg_expr = eval_eq(node.expr)
         substituted = substitute(func.expr, func.param, arg_expr)
+        if "\\" in substituted: return substituted
         poly = parse_expr(substituted)
         return format_poly(poly)
     elif node.type == parser.NodeType.Assignment: return None
@@ -172,22 +208,22 @@ def eval_eq(node: parser.Node):
 def eval_ast(node: parser.Node):
     if node.type == parser.NodeType.Number: return float(node.token.s)
     elif node.type == parser.NodeType.Variable:
-        if node.token.s=="PI": return math.pi
-        elif node.token.s=="rand": return random.randint(0,sys.maxsize)
+        if node.token.s == "PI": return math.pi
+        elif node.token.s == "rand": return random.randint(0, sys.maxsize)
         elif node.token.s in variables: return variables[node.token.s]
         else: raise ValueError(f"Undefined variable: {node.token.s}")
     elif node.type == parser.NodeType.BinOp:
         left = eval_ast(node.lhs)
         right = eval_ast(node.rhs)
-        if node.token.type==lexer.TokenType.PLUS: return left+right
-        elif node.token.type==lexer.TokenType.MINUS: return left-right
-        elif node.token.type==lexer.TokenType.STAR: return left*right
-        elif node.token.type==lexer.TokenType.FSLASH: return left/right
-        elif node.token.type==lexer.TokenType.MODULO: return left%right
-        elif node.token.type==lexer.TokenType.POWER: return left**right
+        if node.token.type == lexer.TokenType.PLUS:   return left + right
+        elif node.token.type == lexer.TokenType.MINUS:  return left - right
+        elif node.token.type == lexer.TokenType.STAR:   return left * right
+        elif node.token.type == lexer.TokenType.FSLASH: return left / right
+        elif node.token.type == lexer.TokenType.MODULO: return left % right
+        elif node.token.type == lexer.TokenType.POWER:  return left ** right
     elif node.type == parser.NodeType.UnOp:
-        if node.token.type==lexer.TokenType.MINUS: return -eval_ast(node.rhs)
-        elif node.token.type==lexer.TokenType.SQRT: return math.sqrt(eval_ast(node.rhs))
+        if node.token.type == lexer.TokenType.MINUS: return -eval_ast(node.rhs)
+        elif node.token.type == lexer.TokenType.SQRT: return math.sqrt(eval_ast(node.rhs))
     elif node.type == parser.NodeType.Parenthesis: return eval_ast(node.expr)
     elif node.type == parser.NodeType.Assignment:
         val = eval_ast(node.rhs)
@@ -204,8 +240,8 @@ def eval_ast(node: parser.Node):
         old_val = variables.get(param)
         variables[param] = arg_val
         result = eval_ast(func.expr)
-        if old_val is not None: variables[param]=old_val
-        else: variables.pop(param,None)
+        if old_val is not None: variables[param] = old_val
+        else: variables.pop(param, None)
         return result
     elif node.type == parser.NodeType.Eol: return
     else: raise ValueError(f"Unknown node type: {node.type}")
@@ -223,27 +259,27 @@ def run_line(line, eq_mode):
         if res is not None and ast.type not in (parser.NodeType.Assignment, parser.NodeType.Function, parser.NodeType.Eol):
             print(res)
 
-if __name__=="__main__":
-    if len(sys.argv)<2:
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
         while True:
             try:
                 line = input(">> ").strip()
-                if line=="exit": break
+                if line == "exit": break
                 eq_mode = False
                 if line.endswith("--eq"):
-                    eq_mode=True
+                    eq_mode = True
                     line = line[:-4].strip()
                 run_line(line, eq_mode)
             except KeyboardInterrupt: break
             except Exception as e: print(f"Error: {e}")
     else:
-        with open(sys.argv[1],'r') as f:
+        with open(sys.argv[1], 'r') as f:
             for line in f:
-                line=line.strip()
+                line = line.strip()
                 if not line: continue
-                eq_mode=False
+                eq_mode = False
                 if line.endswith("--eq"):
-                    eq_mode=True
-                    line=line[:-4].strip()
+                    eq_mode = True
+                    line = line[:-4].strip()
                 try: run_line(line, eq_mode)
                 except Exception as e: print(f"Error: {e}")
