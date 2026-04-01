@@ -1,0 +1,6 @@
+f(x) = 2*x
+g(x) = x+3
+
+result = f(g(12))
+
+result
