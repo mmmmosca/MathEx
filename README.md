@@ -7,7 +7,7 @@ Operations:
 - +: addition
 - -: subtraction
 - *: multiplication
-- //: division
+- /: division
 - ^: exponentiation
 - %: modulus
 - \\ : square root
