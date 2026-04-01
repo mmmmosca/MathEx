@@ -296,5 +296,5 @@ if __name__ == "__main__":
                 if line.endswith("--eq"):
                     eq_mode = True
                     line = line[:-4].strip()
-                try: run_line(line, eq_mode)
+                try: run_line(line, eq_mode, False)
                 except Exception as e: print(f"Error: {e}")
