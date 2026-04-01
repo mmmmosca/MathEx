@@ -1,5 +1,6 @@
 import lexer
 import parser
+
 import sys
 import math
 import random
@@ -250,7 +251,7 @@ def eval_ast(node: parser.Node):
     elif node.type == parser.NodeType.Eol: return
     else: raise ValueError(f"Unknown node type: {node.type}")
 
-def run_line(line, eq_mode):
+def run_line(line, eq_mode, ast_mode):
     lex = lexer.Lexer(line)
     tokens = lex.tokenize()
     p = parser.Parser(tokens)
@@ -258,6 +259,8 @@ def run_line(line, eq_mode):
     if eq_mode:
         res = eval_eq(ast)
         if res: print(res)
+    elif ast_mode:
+        parser.print_ast(ast)
     else:
         res = eval_ast(ast)
         if res is not None and ast.type not in (parser.NodeType.Assignment, parser.NodeType.Function, parser.NodeType.Eol):
@@ -265,15 +268,23 @@ def run_line(line, eq_mode):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
+        print("MathEx REPL")
+        print("Type '--ast' after an expression to see it's AST")
+        print("Type '--eq' after a function call to see the equation of that function")
+        print("Type 'exit' to exit from the REPL\n")
         while True:
             try:
                 line = input(">> ").strip()
                 if line == "exit": break
+                ast_mode = False
                 eq_mode = False
                 if line.endswith("--eq"):
                     eq_mode = True
                     line = line[:-4].strip()
-                run_line(line, eq_mode)
+                elif line.endswith("--ast"):
+                    ast_mode = True
+                    line = line[:-5].strip()
+                run_line(line, eq_mode, ast_mode)
             except KeyboardInterrupt: break
             except Exception as e: print(f"Error: {e}")
     else:
