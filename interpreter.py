@@ -1,6 +1,5 @@
 import lexer
 import parser
-
 import sys
 import math
 import random
@@ -35,6 +34,7 @@ def format_poly(p):
     for k in sorted(p.keys(), reverse=True):
         v = p[k]
         if v == 0: continue
+        v = int(v) if isinstance(v, float) and v.is_integer() else v
         coef = "" if abs(v) == 1 and k != 0 else str(abs(v))
         if k == 0: term = f"{abs(v)}"
         elif k == 1: term = f"{coef}x"
@@ -66,7 +66,6 @@ def parse_expr(expr):
     expr = expr.strip()
     if expr.startswith("\\(") and expr.endswith(")"):
         return {0: 0}
-    # Strip redundant outer parentheses
     while expr.startswith("(") and expr.endswith(")"):
         if expr.startswith("\\("): break
         depth = 0
@@ -109,16 +108,24 @@ def parse_term(term):
     if term.startswith("\\(") and term.endswith(")"):
         return {0: 0}
     if term.startswith("(") and term.endswith(")"):
-        return parse_expr(term)
+        return parse_expr(term[1:-1])
     try:
         return {0: int(term)}
     except:
-        if term == "x": return {1: 1}
-        elif term == "-x": return {1: -1}
-        return parse_expr(term)
+        try:
+            return {0: float(term)}
+        except:
+            if term == "x": return {1: 1}
+            elif term == "-x": return {1: -1}
+            m = re.match(r'^(-?\d*\.?\d*)x(\^(\d+))?$', term)
+            if m:
+                coef_s = m.group(1)
+                coef = float(coef_s) if coef_s not in ("", "-") else (-1.0 if coef_s == "-" else 1.0)
+                exp = int(m.group(3)) if m.group(3) else 1
+                return {exp: coef}
+            raise ValueError(f"Termine non riconoscibile: '{term}'")
 
 def substitute(node, param, value):
-    """Reconstruct a clean expression string with substitution applied."""
     if node.type == parser.NodeType.Number:
         return node.token.s
     elif node.type == parser.NodeType.Variable:
@@ -132,7 +139,6 @@ def substitute(node, param, value):
         if op == lexer.TokenType.PLUS:   return f"{left}+{right}"
         elif op == lexer.TokenType.MINUS:  return f"{left}-{right}"
         elif op == lexer.TokenType.STAR:
-            # Wrap operands in parens only if they contain + or - (lower precedence)
             l = f"({left})" if any(c in left for c in "+-") else left
             r = f"({right})" if any(c in right for c in "+-") else right
             return f"{l}*{r}"
@@ -141,7 +147,6 @@ def substitute(node, param, value):
             r = f"({right})" if any(c in right for c in "+-") else right
             return f"{l}/{r}"
         elif op == lexer.TokenType.POWER:
-            # Base needs parens if it's a compound expression
             l = f"({left})" if any(c in left for c in "+-*/") else left
             return f"{l}^{right}"
     elif node.type == parser.NodeType.UnOp:
@@ -152,7 +157,6 @@ def substitute(node, param, value):
             if val.startswith("\\(") and val.endswith(")"): return f"\\{val[1:]}"
             return f"\\({val})"
     elif node.type == parser.NodeType.Parenthesis:
-        # Just pass through — outer context will add parens if needed
         return substitute(node.expr, param, value)
     elif node.type == parser.NodeType.Call:
         func = functions.get(node.id)
