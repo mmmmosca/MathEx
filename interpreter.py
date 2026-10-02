@@ -236,18 +236,15 @@ def solve_poly(poly):
     a1 = poly.get(1, 0.0)
     a0 = poly.get(0, 0.0)
 
-    # Degree 0: Constant
     if max_deg == 0 or (abs(a3) < 1e-12 and abs(a2) < 1e-12 and abs(a1) < 1e-12):
         if abs(a0) < 1e-12:
             return "Infinite solutions (0 = 0)"
         return "No solutions"
 
-    # Degree 1: Linear ax + b = 0
     if abs(a3) < 1e-12 and abs(a2) < 1e-12:
         x = -a0 / a1
         return [x]
 
-    # Degree 2: Quadratic ax^2 + bx + c = 0
     if abs(a3) < 1e-12:
         disc = a1**2 - 4 * a2 * a0
         if disc >= 0:
@@ -259,17 +256,15 @@ def solve_poly(poly):
             x2 = (-a1 - cmath.sqrt(disc)) / (2 * a2)
             return [x1, x2]
 
-    # Degree 3: Cubic ax^3 + bx^2 + cx + d = 0 (Cardano's Formula)
     a, b, c, d = a3, a2, a1, a0
 
-    # Depress the cubic equation x^3 + p*x + q = 0 via substitution x = t - b/(3a)
     p = (3 * a * c - b**2) / (3 * a**2)
     q = (2 * b**3 - 9 * a * b * c + 27 * a**2 * d) / (27 * a**3)
 
     delta = (q / 2)**2 + (p / 3)**3
 
     roots = []
-    w = (-1 + cmath.sqrt(-3)) / 2  # Primitive cube root of unity
+    w = (-1 + cmath.sqrt(-3)) / 2
 
     if abs(delta) < 1e-12:
         if abs(p) < 1e-12 and abs(q) < 1e-12:
@@ -288,7 +283,6 @@ def solve_poly(poly):
         t3 = -(u + v) / 2 - (u - v) * math.sqrt(3) / 2 * 1j
         roots = [t1, t2, t3]
     else:
-        # 3 real roots (Casus Irreducibilis)
         r = math.sqrt(-(p / 3)**3)
         phi = math.acos(-q / (2 * r))
         t1 = 2 * (-p / 3)**0.5 * math.cos(phi / 3)
@@ -296,7 +290,6 @@ def solve_poly(poly):
         t3 = 2 * (-p / 3)**0.5 * math.cos((phi + 4 * math.pi) / 3)
         roots = [t1, t2, t3]
 
-    # Convert t roots back to x roots: x = t - b/(3a)
     final_roots = [r - b / (3 * a) for r in roots]
     return final_roots
 
@@ -318,7 +311,6 @@ def solve_line(line):
         print(roots)
     else:
         formatted = [_format_root(r) for r in roots]
-        # Remove duplicate numerical values if any
         unique_roots = list(dict.fromkeys(formatted))
         print("x =", ", ".join(unique_roots))
 
