@@ -5,6 +5,7 @@ import sys
 import math
 import random
 import re
+import cmath
 
 variables = {}
 functions = {}
@@ -13,14 +14,14 @@ def add_poly(p1, p2):
     result = p1.copy()
     for k, v in p2.items():
         result[k] = result.get(k, 0) + v
-    return {k: v for k, v in result.items() if v != 0}
+    return {k: v for k, v in result.items() if abs(v) > 1e-12}
 
 def mul_poly(p1, p2):
     result = {}
     for k1, v1 in p1.items():
         for k2, v2 in p2.items():
             result[k1 + k2] = result.get(k1 + k2, 0) + v1 * v2
-    return {k: v for k, v in result.items() if v != 0}
+    return {k: v for k, v in result.items() if abs(v) > 1e-12}
 
 def pow_poly(p, n):
     if n == 0: return {0: 1}
@@ -34,7 +35,7 @@ def format_poly(p):
     terms = []
     for k in sorted(p.keys(), reverse=True):
         v = p[k]
-        if v == 0: continue
+        if abs(v) < 1e-12: continue
         v = int(v) if isinstance(v, float) and v.is_integer() else v
         coef = "" if abs(v) == 1 and k != 0 else str(abs(v))
         if k == 0: term = f"{abs(v)}"
@@ -42,6 +43,7 @@ def format_poly(p):
         else: term = f"{coef}x^{k}"
         if v < 0: term = f"-{term}"
         terms.append(term)
+    if not terms: return "0"
     expr = terms[0]
     for term in terms[1:]:
         if term.startswith("-"): expr += term
@@ -210,6 +212,116 @@ def eval_eq(node: parser.Node):
     elif node.type == parser.NodeType.Eol: return ""
     else: raise ValueError(f"Unknown node type: {node.type}")
 
+def _format_root(r):
+    if isinstance(r, complex):
+        real = round(r.real, 6)
+        imag = round(r.imag, 6)
+        if abs(imag) < 1e-6:
+            return str(real if real != -0.0 else 0.0)
+        if abs(real) < 1e-6:
+            return f"{imag}i"
+        sign = "+" if imag > 0 else "-"
+        return f"{real} {sign} {abs(imag)}i"
+    else:
+        val = round(r, 6)
+        return str(val if val != -0.0 else 0.0)
+
+def solve_poly(poly):
+    max_deg = max(poly.keys()) if poly else 0
+    if max_deg > 3:
+        raise ValueError(f"Cannot solve equations of degree {max_deg} (supported up to degree 3)")
+
+    a3 = poly.get(3, 0.0)
+    a2 = poly.get(2, 0.0)
+    a1 = poly.get(1, 0.0)
+    a0 = poly.get(0, 0.0)
+
+    # Degree 0: Constant
+    if max_deg == 0 or (abs(a3) < 1e-12 and abs(a2) < 1e-12 and abs(a1) < 1e-12):
+        if abs(a0) < 1e-12:
+            return "Infinite solutions (0 = 0)"
+        return "No solutions"
+
+    # Degree 1: Linear ax + b = 0
+    if abs(a3) < 1e-12 and abs(a2) < 1e-12:
+        x = -a0 / a1
+        return [x]
+
+    # Degree 2: Quadratic ax^2 + bx + c = 0
+    if abs(a3) < 1e-12:
+        disc = a1**2 - 4 * a2 * a0
+        if disc >= 0:
+            x1 = (-a1 + math.sqrt(disc)) / (2 * a2)
+            x2 = (-a1 - math.sqrt(disc)) / (2 * a2)
+            return [x1, x2] if abs(disc) > 1e-12 else [x1]
+        else:
+            x1 = (-a1 + cmath.sqrt(disc)) / (2 * a2)
+            x2 = (-a1 - cmath.sqrt(disc)) / (2 * a2)
+            return [x1, x2]
+
+    # Degree 3: Cubic ax^3 + bx^2 + cx + d = 0 (Cardano's Formula)
+    a, b, c, d = a3, a2, a1, a0
+
+    # Depress the cubic equation x^3 + p*x + q = 0 via substitution x = t - b/(3a)
+    p = (3 * a * c - b**2) / (3 * a**2)
+    q = (2 * b**3 - 9 * a * b * c + 27 * a**2 * d) / (27 * a**3)
+
+    delta = (q / 2)**2 + (p / 3)**3
+
+    roots = []
+    w = (-1 + cmath.sqrt(-3)) / 2  # Primitive cube root of unity
+
+    if abs(delta) < 1e-12:
+        if abs(p) < 1e-12 and abs(q) < 1e-12:
+            roots = [0.0, 0.0, 0.0]
+        else:
+            u = (-q / 2)**(1/3) if -q / 2 >= 0 else -(- -q / 2)**(1/3)
+            roots = [2 * u, -u, -u]
+    elif delta > 0:
+        u_val = -q / 2 + math.sqrt(delta)
+        v_val = -q / 2 - math.sqrt(delta)
+        u = u_val**(1/3) if u_val >= 0 else -(-u_val)**(1/3)
+        v = v_val**(1/3) if v_val >= 0 else -(-v_val)**(1/3)
+
+        t1 = u + v
+        t2 = -(u + v) / 2 + (u - v) * math.sqrt(3) / 2 * 1j
+        t3 = -(u + v) / 2 - (u - v) * math.sqrt(3) / 2 * 1j
+        roots = [t1, t2, t3]
+    else:
+        # 3 real roots (Casus Irreducibilis)
+        r = math.sqrt(-(p / 3)**3)
+        phi = math.acos(-q / (2 * r))
+        t1 = 2 * (-p / 3)**0.5 * math.cos(phi / 3)
+        t2 = 2 * (-p / 3)**0.5 * math.cos((phi + 2 * math.pi) / 3)
+        t3 = 2 * (-p / 3)**0.5 * math.cos((phi + 4 * math.pi) / 3)
+        roots = [t1, t2, t3]
+
+    # Convert t roots back to x roots: x = t - b/(3a)
+    final_roots = [r - b / (3 * a) for r in roots]
+    return final_roots
+
+def solve_line(line):
+    eq_str = line
+    if "--solve" in eq_str:
+        eq_str = eq_str.replace("--solve", "").strip()
+
+    if "=" in eq_str:
+        left_str, right_str = eq_str.split("=", 1)
+        p_left = parse_expr(left_str)
+        p_right = parse_expr(right_str)
+        poly = add_poly(p_left, {k: -v for k, v in p_right.items()})
+    else:
+        poly = parse_expr(eq_str)
+
+    roots = solve_poly(poly)
+    if isinstance(roots, str):
+        print(roots)
+    else:
+        formatted = [_format_root(r) for r in roots]
+        # Remove duplicate numerical values if any
+        unique_roots = list(dict.fromkeys(formatted))
+        print("x =", ", ".join(unique_roots))
+
 def eval_ast(node: parser.Node):
     if node.type == parser.NodeType.Number: return float(node.token.s)
     elif node.type == parser.NodeType.Variable:
@@ -251,7 +363,11 @@ def eval_ast(node: parser.Node):
     elif node.type == parser.NodeType.Eol: return
     else: raise ValueError(f"Unknown node type: {node.type}")
 
-def run_line(line, eq_mode, ast_mode):
+def run_line(line, eq_mode, ast_mode, solve_mode):
+    if solve_mode:
+        solve_line(line)
+        return
+
     lex = lexer.Lexer(line)
     tokens = lex.tokenize()
     p = parser.Parser(tokens)
@@ -269,8 +385,9 @@ def run_line(line, eq_mode, ast_mode):
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("MathEx REPL")
-        print("Type '--ast' after an expression to see it's AST")
+        print("Type '--ast' after an expression to see its AST")
         print("Type '--eq' after a function call to see the equation of that function")
+        print("Type '--solve' after an equation to solve polynomials up to degree 3")
         print("Type 'exit' to exit from the REPL\n")
         while True:
             try:
@@ -278,13 +395,19 @@ if __name__ == "__main__":
                 if line == "exit": break
                 ast_mode = False
                 eq_mode = False
-                if line.endswith("--eq"):
+                solve_mode = False
+
+                if line.endswith("--solve"):
+                    solve_mode = True
+                    line = line[:-7].strip()
+                elif line.endswith("--eq"):
                     eq_mode = True
                     line = line[:-4].strip()
                 elif line.endswith("--ast"):
                     ast_mode = True
                     line = line[:-5].strip()
-                run_line(line, eq_mode, ast_mode)
+
+                run_line(line, eq_mode, ast_mode, solve_mode)
             except KeyboardInterrupt: break
             except Exception as e: print(f"Error: {e}")
     else:
@@ -293,8 +416,12 @@ if __name__ == "__main__":
                 line = line.strip()
                 if not line: continue
                 eq_mode = False
-                if line.endswith("--eq"):
+                solve_mode = False
+                if line.endswith("--solve"):
+                    solve_mode = True
+                    line = line[:-7].strip()
+                elif line.endswith("--eq"):
                     eq_mode = True
                     line = line[:-4].strip()
-                try: run_line(line, eq_mode, False)
+                try: run_line(line, eq_mode, False, solve_mode)
                 except Exception as e: print(f"Error: {e}")
